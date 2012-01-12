@@ -1,0 +1,5 @@
+sqlite/
+main.o
+alfred
+cscope.out
+*.swp

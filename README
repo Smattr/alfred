@@ -1,0 +1,4 @@
+alfred - A no-nonsense SQLite server.
+
+ > make             # Read the Makefile for more compilation options.
+ > ./alfred -h
