@@ -41,7 +41,7 @@ DEFINES += -DNDEBUG
 endif
 
 ifndef STATIC
-STATIC := 0
+STATIC := 1
 endif
 ifeq (${STATIC},1)
 SOURCES += ${SOURCE_ROOT}/sqlite/sqlite3.c
