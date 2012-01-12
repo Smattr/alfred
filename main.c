@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,12 +66,14 @@ static int verbose;
 static int sockfd,      /* Socket to bind and listen on. */
            read_sockfd; /* Socket to communicate with a client. */
 
+static sqlite3 *db;
+
 /* Print program usage information. */
 static inline void usage(char *progname) {
     (void)fprintf(stderr,
         "alfred - a no-nonsense SQLite server.\n"
         " usage: %s [options] database\n\n"
-        " oiptions:\n"
+        " options:\n"
         "    " BOLD("-h") " Print this help information.\n",
         progname);
 }
@@ -86,6 +89,7 @@ static void quit(int signum) {
         (signum == SIGTERM ? "SIGTERM" : "SIGINT"));
     (void)close(read_sockfd);
     (void)close(sockfd);
+    sqlite3_close(db);
     exit(0);
 }
 
@@ -98,6 +102,19 @@ static void *xrealloc(void *ptr, size_t size) {
     return ptr;
 }
 
+static void transmit(char *format, ...) {
+    (void)format;
+}
+
+static int callback(void *req, int argc, char **argv, char **column) {
+    /* TODO: implement me. */
+    (void)req;
+    (void)argc;
+    (void)argv;
+    (void)column;
+    return 0;
+}
+
 int main(int argc, char **argv) {
     int c;
     struct sockaddr_in server, client;
@@ -106,6 +123,8 @@ int main(int argc, char **argv) {
     char buffer[BUFFER_SIZE];
     char *offload_buffer;
     int offload_buffer_sz;
+    char *err;
+    uint32_t *req = 0; /* Request sequence number. */
 
     /* Default settings. */
     int port = DEFAULT_PORT;
@@ -125,10 +144,23 @@ int main(int argc, char **argv) {
             } case 'v': {
                 verbose = 1;
                 break;
-            } default: {
+            } case '?': /* Fall through. */
+              default: {
                 usage(argv[0]);
                 return 1;
             }
+        }
+    }
+
+    /* Get the database to open. */
+    if (optind == argc) {
+        DIE("Missing required database argument. %s -h for usage information.\n", argv[0]);
+    } else if (optind < argc - 1) {
+        DIE("You can only open a single database per alfred instance. %s -h for usage information.\n", argv[0]);
+    } else {
+        if (sqlite3_open(argv[optind], &db)) {
+            sqlite3_close(db);
+            DIE("Failed to open %s.\n", argv[optind]);
         }
     }
 
@@ -158,13 +190,16 @@ int main(int argc, char **argv) {
     do {
         /* Wait for an incoming connection. */
         client_sz = sizeof(client);
+        dprintf("Waiting for connection on %s:%d\n",
+            (server.sin_addr.s_addr == 0 ? "*" : inet_ntop(AF_INET, &server.sin_addr,
+            buffer, INET_ADDRSTRLEN)), ntohs(server.sin_port));
         if ((read_sockfd = accept(sockfd, (struct sockaddr*)&client,
             &client_sz)) < 0) {
             DIE("Could not establish connection.\n");
         }
         dprintf("Connection from %s:%d\n",
             inet_ntop(AF_INET, &client.sin_addr, buffer, INET_ADDRSTRLEN),
-            client.sin_port);
+            ntohs(client.sin_port));
 
         /* TODO: Add support for a magic exit command. */
         /* Read data from the client. */
@@ -191,6 +226,15 @@ int main(int argc, char **argv) {
 
             dprintf("Received %d character(s): %s", offload_buffer_sz,
                 offload_buffer);
+            /* Bonus marks if you can see why req is typed as uint32_t and then
+             * cast multiple times in the following line. Not a typo...
+             */
+            if (sqlite3_exec(db, offload_buffer, &callback,
+                (void*)(uintptr_t)++req, &err) != SQLITE_OK) {
+                dprintf("Failed to execute query %lu: %s\n", (unsigned long)req, err);
+                transmit("%d: Error: %s\n", req, err);
+                sqlite3_free(err);
+            }
             /* We could free offload_buffer at this point, but it saves time to
              * just let the next realloc take care of this.
              */
