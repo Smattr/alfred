@@ -246,7 +246,7 @@ int main(int argc, char **argv) {
     int readonly = 0;
 
     /* Command line argument parsing. */
-    while ((c = getopt(argc, argv, "hnp:v")) != -1) {
+    while ((c = getopt(argc, argv, "hnp:rv")) != -1) {
         switch (c) {
             case 'h': {
                 usage(argv[0]);
