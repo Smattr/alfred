@@ -15,6 +15,14 @@
 /* Use this as a safe guard for marking code that should never be executed. */
 #define UNREACHABLE assert(!"Unreachable code executed!")
 
+/* GCC grr... */
+#define IGNORE_RESULT(x) \
+    do { \
+        if (x) { \
+            /* Nothing. */ \
+        } \
+    } while (0)
+
 #define compile_time_assert(name, condition) \
     typedef char name[(condition) ? 1 : -1 ]
 
@@ -58,15 +66,30 @@ compile_time_assert(buffer_can_fit_IPv4_address,
         } \
     } while (0)
 
+enum response {
+    OK = 0,
+    ERR = -1,
+    DATA = 1,
+};
+
 /* Verbosity. 0 for disabled, 1 for enabled. This setting is controlled by the
  * command line argument -v.
  */
 static int verbose;
 
+static int prompt = 1;
+
 static int sockfd,      /* Socket to bind and listen on. */
            read_sockfd; /* Socket to communicate with a client. */
 
 static sqlite3 *db;
+
+#define SEND_PROMPT \
+    do { \
+        if (prompt) { \
+            IGNORE_RESULT(write(read_sockfd, "> ", 2)); \
+        } \
+    } while (0)
 
 /* Print program usage information. */
 static inline void usage(char *progname) {
@@ -74,8 +97,15 @@ static inline void usage(char *progname) {
         "alfred - a no-nonsense SQLite server.\n"
         " usage: %s [options] database\n\n"
         " options:\n"
-        "    " BOLD("-h") " Print this help information.\n",
-        progname);
+        "    " BOLD("-h") "\n"
+        "     Print this help information.\n"
+        "    " BOLD("-n") "\n"
+        "     Disable the prompt that is sent to the client.\n"
+        "    " BOLD("-p port") "\n"
+        "     Listen on the designated port (default %d).\n"
+        "    " BOLD("-v") "\n"
+        "     Be verbose.\n"
+        , progname, DEFAULT_PORT);
 }
 
 /* Invoked on SIGTERM/SIGINT to clean up and exit. */
@@ -102,16 +132,43 @@ static void *xrealloc(void *ptr, size_t size) {
     return ptr;
 }
 
-static void transmit(char *format, ...) {
-    (void)format;
+static int transmit(uint32_t req, enum response code, char *data) {
+    char *msg;
+    int n;
+
+    /* We shouldn't be transmitted anything before a connection has been made.
+     */
+    assert(read_sockfd > 0);
+
+    /* We should be sending a valid code. */
+    assert(code == OK || code == ERR || code == DATA);
+
+    msg = (char*)xrealloc(NULL, 10 /* characters to store uint32_t. */
+                              + strlen(": ")
+                              + 2 /* characters to store enum response. */
+                              + strlen(": ")
+                              + strlen(data)
+                              + 2 /* \n\0 */);
+    sprintf(msg, "%u: %d: %s\n", req, code, data);
+    n = write(read_sockfd, msg, strlen(msg));
+    if (n < 0) dprintf("Error writing to socket.\n");
+    free(msg);
+    return n;
 }
 
 static int callback(void *req, int argc, char **argv, char **column) {
-    /* TODO: implement me. */
-    (void)req;
-    (void)argc;
-    (void)argv;
-    (void)column;
+    char *data = NULL;
+    int i;
+
+    for (i = 0; i < argc; ++i) {
+        data = (char*)xrealloc(data, strlen(column[i])
+                                   + strlen(" = ")
+                                   + (argv[i] ? strlen(argv[i]) : strlen("NULL"))
+                                   + 1 /* \0 */);
+        sprintf(data, "%s = %s", column[i], argv[i] ? argv[i] : "NULL");
+        (void)transmit((uint32_t)(uintptr_t)req, DATA, data);
+    }
+    free(data);
     return 0;
 }
 
@@ -124,17 +181,20 @@ int main(int argc, char **argv) {
     char *offload_buffer;
     int offload_buffer_sz;
     char *err;
-    uint32_t *req = 0; /* Request sequence number. */
+    uint32_t req = 0; /* Request sequence number. */
 
     /* Default settings. */
     int port = DEFAULT_PORT;
 
     /* Command line argument parsing. */
-    while ((c = getopt(argc, argv, "hp:v")) != -1) {
+    while ((c = getopt(argc, argv, "hnp:v")) != -1) {
         switch (c) {
             case 'h': {
                 usage(argv[0]);
                 return 0;
+            } case 'n': {
+                prompt = 0;
+                break;
             } case 'p': {
                 port = atoi(optarg);
                 if (port == 0) {
@@ -205,6 +265,7 @@ int main(int argc, char **argv) {
         /* Read data from the client. */
         offload_buffer = NULL;
         offload_buffer_sz = 0;
+        SEND_PROMPT;
         while ((sz = read(read_sockfd, buffer, BUFFER_SIZE)) > 0) {
 
             /* Shunt the characters into the offload buffer. The purpose of
@@ -232,15 +293,20 @@ int main(int argc, char **argv) {
             if (sqlite3_exec(db, offload_buffer, &callback,
                 (void*)(uintptr_t)++req, &err) != SQLITE_OK) {
                 dprintf("Failed to execute query %lu: %s\n", (unsigned long)req, err);
-                transmit("%d: Error: %s\n", req, err);
+                (void)transmit(req, ERR, err);
                 sqlite3_free(err);
+            } else {
+                (void)transmit(req, OK, "");
             }
             /* We could free offload_buffer at this point, but it saves time to
              * just let the next realloc take care of this.
              */
             offload_buffer_sz = 0;
+            SEND_PROMPT;
         }
         dprintf("Client disconnected.\n");
+        (void)close(read_sockfd);
+        read_sockfd = 0;
     } while (1);
 
     /* quit() handles exit actions. */
