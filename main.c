@@ -369,6 +369,7 @@ int main(int argc, char **argv) {
             SEND_PROMPT;
         }
         dprintf("Client disconnected.\n");
+        free(offload_buffer);
         (void)close(read_sockfd);
         read_sockfd = 0;
     } while (1);
