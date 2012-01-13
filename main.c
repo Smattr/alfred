@@ -87,12 +87,6 @@
 compile_time_assert(buffer_can_fit_IPv4_address,
     BUFFER_SIZE >= INET_ADDRSTRLEN + 1);
 
-/* Embolden a string when printed to the terminal. Note, this macro cannot be
- * used carelessly and requires a bit of forethought about the effect of its
- * expansion in a given context.
- */
-#define BOLD(s) "\033[1m" s "\033[0m"
-
 /* Print an error message and exit. */
 #define DIE(...) \
     do { \
@@ -144,16 +138,11 @@ static inline void usage(char *progname) {
         "alfred - a no-nonsense SQLite server.\n"
         " usage: %s [options] database\n\n"
         " options:\n"
-        "    " BOLD("-h") "\n"
-        "     Print this help information.\n"
-        "    " BOLD("-n") "\n"
-        "     Disable the prompt that is sent to the client.\n"
-        "    " BOLD("-p port") "\n"
-        "     Listen on the designated port (default %d).\n"
-        "    " BOLD("-r") "\n"
-        "     Open the database read-only.\n"
-        "    " BOLD("-v") "\n"
-        "     Be verbose.\n"
+        "    -h       Print this help information.\n"
+        "    -n       Disable the prompt that is sent to the client.\n"
+        "    -p port  Listen on the designated port (default %d).\n"
+        "    -r       Open the database read-only.\n"
+        "    -v       Be verbose.\n"
         , progname, DEFAULT_PORT);
 }
 
