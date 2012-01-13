@@ -1,16 +1,28 @@
+# Examples to make alfred:
+#
+#  make               Download SQLite and statically link it.
+#  make STATIC=0      Don't download SQLite, but link dynamically.
+#  make V=1           Build verbosely.
+#  make DEBUG=1       Build with GDB hooks, assertions, etc.
+#
 
 .PHONY: default
 default: alfred
 
+# Define SOURCE_ROOT if you are doing an out-of-tree build.
 ifndef SOURCE_ROOT
 SOURCE_ROOT := ${CURDIR}
 endif
 
+# Location of SQLite to download. Update this if you want to use a different
+# version of SQLite.
 SQLITE_ROOT := http://www.sqlite.org
 SQLITE_FILE := sqlite-amalgamation-3070900.zip
 
+# Source files.
 SOURCES := ${SOURCE_ROOT}/main.c
 
+# Compiler and options.
 CC    := gcc
 STRIP := strip
 
@@ -40,6 +52,8 @@ C_FLAGS += -Werror -O2 -fomit-frame-pointer
 DEFINES += -DNDEBUG
 endif
 
+# Static or dynamic linking. This hasn't been tested thoroughly and probably
+# needs some work.
 ifndef STATIC
 STATIC := 1
 endif
