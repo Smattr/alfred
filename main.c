@@ -56,7 +56,8 @@
 
 /* GCC's excessive warnings are nice to have on, but sometimes really hard to
  * quash when you know what you're doing. Use this macro to wrap a function
- * call where you really, really do want to ignore the result.
+ * call where you really, really do want to ignore the result. The optimiser
+ * should take care of dropping the useless comparison.
  */
 #define IGNORE_RESULT(x) \
     do { \
@@ -141,6 +142,7 @@ static inline void usage(char *progname) {
         "    -h       Print this help information.\n"
         "    -n       Disable the prompt that is sent to the client.\n"
         "    -p port  Listen on the designated port (default %d).\n"
+        "    -q       Allow the client to cause exit by sending \"exit\" or \"quit\".\n"
         "    -r       Open the database read-only.\n"
         "    -v       Be verbose.\n"
         , progname, DEFAULT_PORT);
@@ -162,7 +164,7 @@ static void quit(int signum) {
 }
 
 /* Wrapper on realloc to avoid handling out of memory. */
-static void *xrealloc(void *ptr, size_t size) {
+static inline void *xrealloc(void *ptr, size_t size) {
     ptr = realloc(ptr, size);
     if (ptr == NULL) {
         DIE("Out of memory.\n");
@@ -221,21 +223,22 @@ static int callback(void *req, int argc, char **argv, char **column) {
 
 int main(int argc, char **argv) {
     int c;
-    struct sockaddr_in server, client;
+    struct sockaddr_in server, client; /* Socket connection info. */
     socklen_t client_sz;
     int sz;
-    char buffer[BUFFER_SIZE];
-    char *offload_buffer;
+    char buffer[BUFFER_SIZE]; /* Buffer for holding initial input from client. */
+    char *offload_buffer; /* Buffer for accumulating input from client. */
     int offload_buffer_sz;
     char *err;
     uint32_t req = 0; /* Request sequence number. */
 
     /* Default settings. */
-    int port = DEFAULT_PORT;
-    int readonly = 0;
+    int port = DEFAULT_PORT, /* Port to listen on.                          */
+        readonly = 0,        /* Whether to open database read-only.         */
+        client_can_quit = 0; /* Whether the client can cause a server exit. */
 
     /* Command line argument parsing. */
-    while ((c = getopt(argc, argv, "hnp:rv")) != -1) {
+    while ((c = getopt(argc, argv, "hnp:qrv")) != -1) {
         switch (c) {
             case 'h': {
                 usage(argv[0]);
@@ -248,6 +251,9 @@ int main(int argc, char **argv) {
                 if (port == 0) {
                     DIE("Invalid port specified.\n");
                 }
+                break;
+            } case 'q': {
+                client_can_quit = 1;
                 break;
             } case 'r': {
                 readonly = 1;
@@ -328,18 +334,34 @@ int main(int argc, char **argv) {
                 sizeof(char) * (offload_buffer_sz + sz));
             (void)strncpy(offload_buffer + offload_buffer_sz, buffer, sz);
             offload_buffer_sz += sz;
-            if (offload_buffer[offload_buffer_sz - 1] != '\n') {
+            if (offload_buffer[offload_buffer_sz - 1] != '\n' &&
+                offload_buffer[offload_buffer_sz - 1] != '\r') {
                 /* The request is overflowing the buffer. */
                 continue;
             }
 
-            /* Terminate the buffer. */
-            offload_buffer = (char*)xrealloc(offload_buffer,
-                sizeof(char) * (offload_buffer_sz + 1));
-            offload_buffer[offload_buffer_sz] = '\0';
+            /* Terminate the buffer as early as possible. Typically there are
+             * multiple trailing \n and \rs.
+             */
+             --offload_buffer_sz;
+            while (offload_buffer_sz >= 0 &&
+                (offload_buffer[offload_buffer_sz] == '\r' ||
+                offload_buffer[offload_buffer_sz] == '\n')) {
+                --offload_buffer_sz;
+            }
+            offload_buffer[offload_buffer_sz + 1] = '\0';
 
-            dprintf("Received %d character(s): %s", offload_buffer_sz,
+            dprintf("Received %d character(s): %s\n", offload_buffer_sz,
                 offload_buffer);
+
+            /* Fake a SIGTERM and quit if requested by the client. */
+            if (client_can_quit &&
+                (!strcmp(offload_buffer, "exit") ||
+                !strcmp(offload_buffer, "quit"))) {
+                quit(SIGTERM);
+                UNREACHABLE;
+            }
+
             /* Bonus marks if you can see why req is typed as uint32_t and then
              * cast multiple times in the following line. Not a typo...
              */
