@@ -36,9 +36,13 @@ ifndef V
 V := 0
 endif
 ifeq (${V},1)
-Q :=
+Q       :=
+WGET_Q  :=
+UNZIP_Q :=
 else
-Q := @
+Q       := @
+WGET_Q  := -q
+UNZIP_Q := -q
 endif
 
 # Debug settings.
@@ -58,36 +62,47 @@ ifndef STATIC
 STATIC := 1
 endif
 ifeq (${STATIC},1)
-SOURCES += ${SOURCE_ROOT}/sqlite/sqlite3.c
+SOURCES  += ${SOURCE_ROOT}/sqlite/sqlite3.c
 LD_FLAGS += -ldl -lpthread
 endif
+
+# Disable GNU Make built-in rules.
+.SUFFIXES:
 
 .PHONY: alfred
 alfred: ${SOURCE_ROOT}/alfred
 
 ${SOURCE_ROOT}/alfred: $(patsubst %.c,%.o,${SOURCES})
-	@echo " [LD]    $@"
+	@echo " [LD]    $(notdir $@)"
 	${Q}${CC} ${LD_FLAGS} -o $@ $^
-	@$(if $(findstring 0,${DEBUG}),echo " [STRIP] $@",)
+	@$(if $(findstring 0,${DEBUG}),echo " [STRIP] $(notdir $@)",)
 	${Q}$(if $(findstring 0,${DEBUG}),${STRIP} $@,)
 
+ifeq (${STATIC},1)
+${SOURCE_ROOT}/main.o: ${SOURCE_ROOT}/sqlite/sqlite3.h
 %.o: %.c
-	@echo " [CC]    $@"
-	${Q}${CC} ${C_FLAGS} ${DEFINES} -I ${SOURCE_ROOT}/sqlite -o $@ -c $^
+	@echo " [CC]    $(notdir $@)"
+	${Q}${CC} ${C_FLAGS} ${DEFINES} -I ${SOURCE_ROOT}/sqlite -o $@ -c $<
+else
+%.o: %.c
+	@echo " [CC]    $(notdir $@)"
+	${Q}${CC} ${C_FLAGS} ${DEFINES} -o $@ -c $^
+endif
 
 #
 # Local SQLite source files, if required.
 #
 
 ${SOURCE_ROOT}/sqlite:
-	@echo "[MKDIR] $@"
+	@echo " [MKDIR] $@"
 	${Q}mkdir $@
 
-${SOURCE_ROOT}/sqlite/sqlite3.c: |${SOURCE_ROOT}/sqlite check-wget check-unzip 
+${SOURCE_ROOT}/sqlite/sqlite3.c: ${SOURCE_ROOT}/sqlite/sqlite3.h # Hack.
+${SOURCE_ROOT}/sqlite/sqlite3.h: |${SOURCE_ROOT}/sqlite check-wget check-unzip 
 	@echo " [WGET]  ${SQLITE_FILE}"
-	${Q}cd ${SOURCE_ROOT}/sqlite && wget "${SQLITE_ROOT}/${SQLITE_FILE}"
+	${Q}cd ${SOURCE_ROOT}/sqlite && wget ${WGET_Q} "${SQLITE_ROOT}/${SQLITE_FILE}"
 	@echo " [UNZIP] ${SQLITE_FILE}"
-	${Q}cd ${SOURCE_ROOT}/sqlite && unzip -j ${SQLITE_FILE} -d .
+	${Q}cd ${SOURCE_ROOT}/sqlite && unzip ${UNZIP_Q} -j ${SQLITE_FILE} -d .
 	@echo " [RM]    ${SQLITE_FILE}"
 	${Q}cd ${SOURCE_ROOT}/sqlite && rm -f ${SQLITE_FILE}
 
