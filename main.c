@@ -150,6 +150,8 @@ static inline void usage(char *progname) {
         "     Disable the prompt that is sent to the client.\n"
         "    " BOLD("-p port") "\n"
         "     Listen on the designated port (default %d).\n"
+        "    " BOLD("-r") "\n"
+        "     Open the database read-only.\n"
         "    " BOLD("-v") "\n"
         "     Be verbose.\n"
         , progname, DEFAULT_PORT);
@@ -241,6 +243,7 @@ int main(int argc, char **argv) {
 
     /* Default settings. */
     int port = DEFAULT_PORT;
+    int readonly = 0;
 
     /* Command line argument parsing. */
     while ((c = getopt(argc, argv, "hnp:v")) != -1) {
@@ -256,6 +259,9 @@ int main(int argc, char **argv) {
                 if (port == 0) {
                     DIE("Invalid port specified.\n");
                 }
+                break;
+            } case 'r': {
+                readonly = 1;
                 break;
             } case 'v': {
                 verbose = 1;
@@ -274,7 +280,8 @@ int main(int argc, char **argv) {
     } else if (optind < argc - 1) {
         DIE("You can only open a single database per alfred instance. %s -h for usage information.\n", argv[0]);
     } else {
-        if (sqlite3_open(argv[optind], &db)) {
+        if ((readonly && sqlite3_open_v2(argv[optind], &db, SQLITE_OPEN_READONLY, NULL)) ||
+            (!readonly && sqlite3_open(argv[optind], &db))) {
             sqlite3_close(db);
             DIE("Failed to open %s.\n", argv[optind]);
         }
